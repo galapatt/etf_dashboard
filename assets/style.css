@@ -1,0 +1,40 @@
+body {
+background-color: #000000;
+color: #8cb4ff;
+font-family: "Segoe UI", sans-serif;
+}
+
+
+div, label, input, select {
+color: #8cb4ff !important;
+}
+
+
+h1, h2, h3, h4, h5, h6 {
+color: #8cb4ff !important;
+}
+
+
+/* Graph background */
+.js-plotly-plot .plotly {
+background-color: #000000 !important;
+}
+
+
+/* Dropdown styling */
+.Select-control {
+background-color: #111111 !important;
+color: #8cb4ff !important;
+}
+
+
+.Select-menu-outer {
+background-color: #111111 !important;
+}
+
+
+/* Input field */
+input {
+background-color: #111111 !important;
+border: 1px solid #333333 !important;
+}

@@ -1,0 +1,6 @@
+# Ignore everything in the insider trades folder
+/data/insider_trades/*
+# Test notebooks
+test.ipynb
+# Virtual environment folder
+/venv/*
