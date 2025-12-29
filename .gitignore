@@ -1,6 +1,6 @@
 # Ignore data files generated during runtime
 /data/insider_trades/*
-!/data/insider_trades/
+!/data/insider_trades/GOOGL.json
 # Test notebooks
 test.ipynb
 # Virtual environment folder
