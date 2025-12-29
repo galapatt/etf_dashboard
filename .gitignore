@@ -5,3 +5,4 @@
 test.ipynb
 # Virtual environment folder
 /venv/*
+/__pycache__/*
