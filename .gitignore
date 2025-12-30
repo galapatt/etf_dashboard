@@ -6,5 +6,5 @@ test.ipynb
 # Virtual environment folder
 /venv/*
 # Python cache files
-/__pycache__/*
-/components/__pycache__/*
+**/__pycache__/
+*.pyc
