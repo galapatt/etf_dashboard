@@ -5,7 +5,7 @@
 import plotly.graph_objs as go
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 def combined_chart(df: pd.DataFrame, tickers: list[str], agg_method: str) -> go.Figure:
@@ -85,14 +85,23 @@ def rolling_insider_chart(insider_trades: dict, outstanding_shares: dict, days: 
     Returns:
         go.Figure: Plotly Figure object representing the rolling insider trading chart.
     """
-    flows ={}
+    today = pd.Timestamp.today().normalize()
 
+    agg_monthly_flows = []
     for ticker,trades in insider_trades.items(): # type: ignore
+        flow_dict = {"ticker": ticker}
         if not trades:
             continue
         amount = 0
         for trade in trades:
-            if (datetime.strptime(trade['date'],"%m/%d/%Y") - datetime.now()).days > days:
+            print(trade['date'],trade['accession_number'])
+            num_days = (datetime.now() - datetime.strptime(trade['date'],"%m/%d/%Y")).days
+            print(num_days) # type: ignore
+            if num_days >= days//2 and f"{days//2}_day_flow" not in flow_dict:
+                flow_dict[f"{days//2}_day_flow"] = amount
+                amount = 0
+            elif num_days >= days:
+                flow_dict[f"{days}_day_flow"] = amount 
                 break
             nd_trades = trade['non_deriv_trades']
             for nd_trade in nd_trades:
@@ -100,30 +109,44 @@ def rolling_insider_chart(insider_trades: dict, outstanding_shares: dict, days: 
                     amount += nd_trade['amount']
                 elif nd_trade['change'] == "D":
                     amount -= nd_trade['amount']
-        flows[ticker] = amount
-
-    df = (
-            pd.DataFrame.from_dict(flows, orient="index", columns=["net_shares"])
-            .reset_index()
-            .rename(columns={"index": "ticker"})
-        )    
-        
+        agg_monthly_flows.append(flow_dict)
+    print(agg_monthly_flows)
+    df = pd.DataFrame.from_records(agg_monthly_flows)
     df['shares_outstanding'] = df['ticker'].map(outstanding_shares)
-    df["pct_outstanding"] = (df["net_shares"] / df["shares_outstanding"]) * 100
-    df["color"] = df["net_shares"].apply(lambda x: "green" if x > 0 else "red")
+
+    df[f"{days//2} pct_outstanding"] = (df[f"{days//2}_day_flow"] / df["shares_outstanding"]) * 100
+    df[f"{days} pct_outstanding"] = (df[f"{days}_day_flow"] / df["shares_outstanding"]) * 100
+
+    df[f"{days//2} color"] = df[f"{days//2}_day_flow"].apply(lambda x: "green" if x > 0 else "red")
+    df[f"{days} color"] = df[f"{days}_day_flow"].apply(lambda x: "green" if x > 0 else "red")
 
     fig = go.Figure()
 
-    fig.add_trace(go.Bar(
-        x=df["net_shares"],
-        y=df["ticker"],
-        orientation="h",
-        marker_color=df["color"],
-        hovertemplate="%{y}: %{x:,.0f}<extra></extra>"
-    ))
+    fig.add_bar(
+        x=df["ticker"],
+        y=df[f"{days//2}_day_flow"],
+        name=f"Last {days//2} Days",
+        marker_color=df[f"{days//2} color"],
+        customdata=df[[f"{days//2} pct_outstanding"]].values,
+        hovertemplate=(
+            f"Net Shares (0-{days//2}d): %{{y:,.0f}}<br>"
+            "% of Shares Outstanding: %{customdata[0]:.3f}%"
+            "<extra></extra>"))
+
+    fig.add_bar(
+        x=df["ticker"],
+        y=df[f"{days}_day_flow"],
+        name=f"Last {days} Days",
+        marker_color=df[f"{days} color"],
+        customdata=df[[f"{days} pct_outstanding"]].values,
+        hovertemplate=(
+            f"Net Shares ({days//2}-{days}d): %{{y:,.0f}}<br>"
+            "% of Shares Outstanding: %{customdata[0]:.3f}%"
+            "<extra></extra>"))
 
     fig.update_layout(
-        title=f"Net Insider / Large-Holder Flow (Trailing {days} Days)",
+        barmode='group',
+        title=f"Net Insider / Large-Holder Flow (Last vs. Prior {days//2} Day Windows)",
         xaxis=dict(
             title="Net Buy / Sell Value",
             zeroline=True,
@@ -136,16 +159,18 @@ def rolling_insider_chart(insider_trades: dict, outstanding_shares: dict, days: 
         template="plotly_dark",
         height=400,
         margin=dict(l=80, r=40, t=50, b=40),
+        hovermode = 'x unified',
+        legend=dict(orientation="h", y=1.05)
     )    
 
-    fig.update_traces(
-        hovertemplate=(
-            "<b>%{customdata[0]}</b><br>"
-            "Net Shares: %{x:,.0f}<br>"
-            "% of Shares Outstanding: %{customdata[1]:.3f}%"
-            "<extra></extra>"
-        ),
-        customdata=df[["ticker", "pct_outstanding"]].values
-    )
+    # fig.update_traces(
+    #     hovertemplate=(
+    #         "<b>%{customdata[0]}</b><br>"
+    #         "Net Shares: %{x:,.0f}<br>"
+    #         "% of Shares Outstanding: %{customdata[1]:.3f}%"
+    #         "<extra></extra>"
+    #     ),
+    #     customdata=df[["ticker", "pct_outstanding"]].values
+    # )
 
     return fig

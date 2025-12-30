@@ -201,7 +201,7 @@ def update_chart(n_clicks, etf, stock_list, period, cum_method, corr_freq):
         else:
             stocks[tick] = trades
 
-    bar_fig = rolling_insider_chart(stocks, outstanding_shares, 60)
+    bar_fig = rolling_insider_chart(stocks, outstanding_shares, 90)
 
     return html.Div([ dbc.Row([
         dbc.Col([dcc.Graph(figure=fig_line)], width=6),
@@ -270,8 +270,8 @@ def update_chart(n_clicks, etf, stock_list, period, cum_method, corr_freq):
 )
 
 def update_line_chart(clickData):
-    ticker = clickData["points"][0]["customdata"][0]
-    net_shares = clickData["points"][0]["x"]
+    ticker = clickData["points"][0]["x"]
+    net_shares = clickData["points"][0]["y"]
     file_path = f"./data/insider_trades/{ticker}.json"
     print(f"Loading insider trades for {ticker} from {file_path}")
     if not os.path.exists(file_path):
