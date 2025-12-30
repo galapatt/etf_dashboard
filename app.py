@@ -167,9 +167,10 @@ def update_chart(n_clicks, etf, stock_list, period, cum_method, corr_freq):
             "inputs_disabled": True
         }
 
-    df_returns = get_daily_returns(tickers, period)
+    df_returns, ret_warnings = get_daily_returns(tickers, period)
+    ret_warnings = [dbc.Alert(warn, color="primary") for warn in ret_warnings] # type: ignore
 
-    fig_line = combined_chart(df_returns, tickers, agg_method=cum_method)
+    fig_line = combined_chart(df_returns, tickers, agg_method=cum_method) # type: ignore
 
     df_prices = get_daily_prices(tickers, period, corr_freq)    
 
@@ -188,21 +189,25 @@ def update_chart(n_clicks, etf, stock_list, period, cum_method, corr_freq):
     
     warnings = []
     for tick, trades in results:
-        if trades and "ERROR" in trades[0].keys():
+        if not trades:
+            warnings.append(dbc.Alert(
+                f"No insider trades for {tick}", color="primary"))
+            stocks[tick] = []
+        elif "ERROR" in trades[0].keys():
             warnings.append(dbc.Alert(
                 f"Error loading insider trades for {tick}: {trades[0]['ERROR']}",
-                color="warning"))
+                color="primary"))
             stocks[tick] = []
         else:
             stocks[tick] = trades
 
-    bar_fig = rolling_insider_chart(stocks, outstanding_shares, 30)
+    bar_fig = rolling_insider_chart(stocks, outstanding_shares, 60)
 
     return html.Div([ dbc.Row([
-        dbc.Col([dcc.Graph(figure=fig_line)], width=7),
-        dbc.Col([dcc.Graph(figure=fig_corr)], width=5),
+        dbc.Col([dcc.Graph(figure=fig_line)], width=6),
+        dbc.Col([dcc.Graph(figure=fig_corr)], width=6),
     ], className="mt-4"), 
-    
+    html.Div(ret_warnings, className="mt-4"),
     html.Hr(),
 
     # === Bottom full-width dataframe ===
@@ -267,7 +272,6 @@ def update_chart(n_clicks, etf, stock_list, period, cum_method, corr_freq):
 def update_line_chart(clickData):
     ticker = clickData["points"][0]["customdata"][0]
     net_shares = clickData["points"][0]["x"]
-    print(net_shares)
     file_path = f"./data/insider_trades/{ticker}.json"
     print(f"Loading insider trades for {ticker} from {file_path}")
     if not os.path.exists(file_path):
@@ -294,7 +298,7 @@ def update_line_chart(clickData):
     fig.add_trace(
         go.Scatter(
             x=dots["date"],
-            y=dots["shares"].cumsum(),  # aligns vertically
+            y=dots["cum_shares"],  # aligns vertically
             mode="markers",
             name="Transactions",
             marker=dict(
@@ -348,9 +352,10 @@ def toggle_inputs(ui_state):
     disabled = ui_state.get("inputs_disabled", False)
     return disabled, disabled, disabled
 
+# cloudflared tunnel --url http://localhost:8050   
 if __name__ == '__main__':
     app.run(
-        host="0.0.0.0",
+        host="127.0.0.1",
         port=8050,
-        debug=False
+        debug=True
     )

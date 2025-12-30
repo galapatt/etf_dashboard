@@ -51,7 +51,7 @@ def get_daily_prices(tickers: list[str], period: str, freq: str) -> pd.DataFrame
     """
     # Download adjusted close prices
     data = yf.download(tickers, period = period, auto_adjust=True)['Close'] # type: ignore
-    data = data.dropna()
+    data.dropna(axis=1, how='all', inplace=True)
 
     # interval = "Daily" or "Weekly" from dropdown
     if freq == "Weekly":
@@ -66,7 +66,7 @@ def get_daily_prices(tickers: list[str], period: str, freq: str) -> pd.DataFrame
     return returns # type: ignore
 
 
-def get_daily_returns(holdings: list[str], period: str) -> pd.DataFrame:  
+def get_daily_returns(holdings: list[str], period: str) -> tuple[pd.DataFrame,list]:  
     """
     Fetches daily returns for each ticker between start_date and end_date,
     adjusting for expense ratios if available.
@@ -78,9 +78,11 @@ def get_daily_returns(holdings: list[str], period: str) -> pd.DataFrame:
 
     Returns:
         pd.DataFrame: DataFrame with daily returns for each symbol.
+        list: Warnings encountered during data retrieval.
     """
 
     tickers = Ticker(holdings)
+    warnings = []
     hist = tickers.history(period = period, interval="1d")
 
     hist = hist.reset_index()[["symbol", "date", "adjclose"]]
@@ -91,7 +93,7 @@ def get_daily_returns(holdings: list[str], period: str) -> pd.DataFrame:
     for symbol, _ in fund_profiles.items():
         df = hist[hist["symbol"] == symbol].copy()
         if df.empty:
-            print(f"No data for {symbol}, skipping.")
+            warnings.append(f"No price data for {symbol}, skipped.")
             continue
         
         # if securities are in different timezones, normalize to date only
@@ -112,7 +114,7 @@ def get_daily_returns(holdings: list[str], period: str) -> pd.DataFrame:
 
         result[symbol] = df["ret"].dropna(axis=0)
 
-    return result
+    return result, warnings
 
 def validate_and_classify_ticker(ticker: str, min_days: int = 250) -> tuple[bool, bool]:
     """
@@ -359,6 +361,8 @@ def transactions_to_cumm_ts(insider_trades: list[dict], net_shares: float) -> tu
                   as_index = False)
         .agg({"shares":"sum"})
     )
+
     dots['impact'] = dots['shares'].abs() / abs(net_shares)
-    dots_filtered = dots[dots['impact'] >= 0.01]  # filter small transactions
+    dots['cum_shares'] = dots.shares.cumsum()
+    dots_filtered = dots[(dots['impact'] >= 0.01) & (dots['shares'].abs() >= 5000)]  # filter out small transactions
     return daily.reset_index().rename(columns={"index": "date"}), dots_filtered # type: ignore

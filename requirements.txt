@@ -66,4 +66,5 @@ yahooquery==2.4.1
 yfinance==0.2.66
 gunicorn
 zipp==3.23.0
+nbformat==4.15.0
 

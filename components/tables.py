@@ -15,17 +15,27 @@ def human_format(num):
     else:
         return str(num)
     
-def color_scale(value):
+def color_scale(value, alpha=0.4) -> str:
+    """
+    Apply color scaling for specific columns 
+    
+    Args:
+        value (float): Value between -1 and +1 (should be percentage change for trailing vs forward PE, or price vs target price).
+        alpha (float): Opacity level for the color.
+    
+    Returns: 
+        str: RGBA color string.
+    """
     # value ∈ [-1, +1] for -100% to +100%
     value = max(-1, min(1, value))  # clip
     if value >= 0:
         # white → green
         green = int(255 - (255 * (1 - value)))
-        return f"rgba(0, {green}, 0, 0.4)"
+        return f"rgba(0, {green}, 0,  {alpha})"
     else:
         # red → white
         red = int(255 - (255 * (1 + value)))
-        return f"rgba({red}, 0, 0, 0.4)"
+        return f"rgba({red}, 0, 0,  {alpha})"
 
 def get_top_holdings_with_performance(etf_ticker, stock_list, n=10):
     """
@@ -62,14 +72,14 @@ def get_top_holdings_with_performance(etf_ticker, stock_list, n=10):
     
     performances = []
     for ticker in df["Ticker"]:
+        perf_dict = {}
         stock = yf.Ticker(ticker)
-        try:
-            hist = stock.history(period="5y")
+        hist = stock.history(period="5y")
 
-            if hist.empty:
-                performances.append({"1Y_Return": None, "5Y_Return": None})
-                continue
-            
+        if hist.empty:
+            one_year_return = None
+            five_year_return = None
+        else:
             # Remove timezone to avoid comparison errors
             hist.index = hist.index.tz_localize(None) # type: ignore
 
@@ -81,38 +91,35 @@ def get_top_holdings_with_performance(etf_ticker, stock_list, n=10):
             one_year_return = (latest_price / one_year_price - 1) * 100 if one_year_price else None
             five_year_return = (latest_price / five_year_price - 1) * 100 if five_year_price else None
 
-            # --- Get most recent revenue ---
-            try:
-                income_stmt = stock.quarterly_income_stmt
-                if income_stmt is not None and not income_stmt.empty and "Total Revenue" in income_stmt.index:
-                    recent_revenue = income_stmt.loc["Total Revenue"].iloc[0] if not math.isnan(income_stmt.loc["Total Revenue"].iloc[0]) else income_stmt.loc["Total Revenue"].iloc[1] # type: ignore
-                else:
-                    recent_revenue = None
-            except Exception:
+        # --- Get most recent revenue ---
+        try:
+            income_stmt = stock.quarterly_income_stmt
+            if income_stmt is not None and not income_stmt.empty and "Total Revenue" in income_stmt.index:
+                recent_revenue = income_stmt.loc["Total Revenue"].iloc[0] if not math.isnan(income_stmt.loc["Total Revenue"].iloc[0]) else income_stmt.loc["Total Revenue"].iloc[1] # type: ignore
+            else:
                 recent_revenue = None
-
-            # --- Get target price and rating ---
-            info = stock.info
-            target_price = info['targetMeanPrice']
-            current_price = info['currentPrice']
-            pe_ratio = info['trailingPE']
-            forward_pe = info.get('forwardPE')
-            rec = info.get('recommendationKey')
-            total_shares = info.get('sharesOutstanding')
-            performances.append({
-                "1Y Return": one_year_return,
-                "5Y Return": five_year_return,
-                "Recent Revenue": recent_revenue,
-                "Current Price": current_price,
-                "Target Price": target_price,
-                "Recommendation": rec,
-                "Trailing PE": pe_ratio,
-                "Forward PE": forward_pe,
-                "Total Shares": total_shares
-            })
-            
         except Exception:
-            performances.append({"1Y Return": None, "5Y Return": None, "Recent Revenue": None})
+            recent_revenue = None
+
+        # --- Get target price and rating ---
+        info = stock.info
+        target_price = info.get('targetMeanPrice',None)
+        current_price = info.get('currentPrice',None)
+        pe_ratio = info.get('trailingPE', None)
+        forward_pe = info.get('forwardPE', None)
+        rec = info.get('recommendationKey', None)
+        total_shares = info.get('sharesOutstanding', None)
+        performances.append({
+            "1Y Return": one_year_return,
+            "5Y Return": five_year_return,
+            "Recent Revenue": recent_revenue,
+            "Current Price": current_price,
+            "Target Price": target_price,
+            "Recommendation": rec,
+            "Trailing PE": pe_ratio,
+            "Forward PE": forward_pe,
+            "Total Shares": total_shares
+        })
     
     perf_df = pd.DataFrame(performances)
     df = pd.concat([df, perf_df], axis=1)
@@ -134,13 +141,16 @@ def get_conditional_formatting(df: pd.DataFrame):
         list: list of style dictionaries for Dash DataTable.
     """
     px_pct_diff = (df["Target Price"] - df["Current Price"]) / df["Current Price"]
-    inv_pe_pct_diff = -(df["Forward PE"] - df["Trailing PE"]) / df["Trailing PE"]
+    inv_pe_pct_diff = -(df["Forward PE"] - df["Trailing PE"]) / df["Trailing PE"] 
 
     style_rules = [{
         "if": {"row_index": "odd"},
         "backgroundColor": "rgb(38, 38, 38)", # type: ignore
     }]
     for i, _ in df.iterrows():
+        value = px_pct_diff[i]
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            continue
         color = color_scale(px_pct_diff[i]) # type: ignore
         style_rules.append({
             "if": {"row_index": i, "column_id": "Current Price"},
@@ -153,6 +163,9 @@ def get_conditional_formatting(df: pd.DataFrame):
             'color': 'white'
         })
 
+        value = inv_pe_pct_diff[i]
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            continue
         color = color_scale(inv_pe_pct_diff[i]) # type: ignore
         style_rules.append({
             "if": {"row_index": i, "column_id": "Trailing PE"},

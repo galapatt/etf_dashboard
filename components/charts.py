@@ -88,7 +88,6 @@ def rolling_insider_chart(insider_trades: dict, outstanding_shares: dict, days: 
     flows ={}
 
     for ticker,trades in insider_trades.items(): # type: ignore
-        print(f"Processing {ticker}...")
         if not trades:
             continue
         amount = 0
