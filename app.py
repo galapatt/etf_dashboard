@@ -8,14 +8,15 @@ import dash_bootstrap_components as dbc
 from data import get_top_holdings, get_daily_returns, get_daily_prices, get_insider_trades, transactions_to_cumm_ts, validate_and_classify_ticker
 from multiprocessing import Pool
 from components.tables import get_top_holdings_with_performance
-from components.charts import combined_chart, corr_heatmap, rolling_insider_chart
+from components.charts import combined_chart, corr_heatmap, create_line_chart, rolling_insider_chart
 from dash.exceptions import PreventUpdate
 import json
-import numpy as np
 import os
 
 app = Dash(__name__, external_stylesheets=[dbc.themes.FLATLY])
 server = app.server
+
+DAYS = 180
 
 app.layout = dbc.Container([
     html.H2("ETF Dashboard"),
@@ -201,7 +202,7 @@ def update_chart(n_clicks, etf, stock_list, period, cum_method, corr_freq):
         else:
             stocks[tick] = trades
 
-    bar_fig = rolling_insider_chart(stocks, outstanding_shares, 90)
+    bar_fig = rolling_insider_chart(stocks, outstanding_shares, DAYS)
 
     return html.Div([ dbc.Row([
         dbc.Col([dcc.Graph(figure=fig_line)], width=6),
@@ -249,6 +250,7 @@ def update_chart(n_clicks, etf, stock_list, period, cum_method, corr_freq):
     html.Div(warnings, className="mt-4"),
     html.Hr(),
     dbc.Row([dcc.Graph(figure=bar_fig, id="insider-bar-chart")], className="mt-4"),
+    html.Div(id="net-shares-output"),
     html.Hr(),
     dcc.Loading(
         children=[
@@ -265,13 +267,18 @@ def update_chart(n_clicks, etf, stock_list, period, cum_method, corr_freq):
 @app.callback(
     Output("insider-line-chart", "figure"),
     Output("insider-line-chart", "style"),
+    Output("net-shares-output", "children"),
     Input("insider-bar-chart", "clickData"),
     prevent_initial_call=True
 )
 
 def update_line_chart(clickData):
     ticker = clickData["points"][0]["x"]
-    net_shares = clickData["points"][0]["y"]
+    both_shares = (clickData["points"][0]["y"],clickData["points"][1]["y"])
+    net_shares = both_shares[0] + both_shares[1]
+    net_shares_stmt = dbc.Alert([f"Clicked ticker: {ticker}; Total Shares Traded over Past {DAYS} Days: {both_shares[0]} + {both_shares[1]} = ",
+                                 html.B(f"{net_shares:,.0f}")], color="dark", style={"backgroundColor": "#222", "color": "white"}, # still useful for text color and override bg
+                                 dismissable=True) # 
     file_path = f"./data/insider_trades/{ticker}.json"
     print(f"Loading insider trades for {ticker} from {file_path}")
     if not os.path.exists(file_path):
@@ -280,63 +287,13 @@ def update_line_chart(clickData):
     with open(f'./data/insider_trades/{ticker}.json') as f:
         insider_trades = json.load(f)
 
-    ts, dots = transactions_to_cumm_ts(
+    ts, dots, q_ends = transactions_to_cumm_ts(
         insider_trades, net_shares
     )
 
-    fig = go.Figure()
+    line_fig = create_line_chart(ticker, ts, dots, q_ends)
 
-    fig.add_trace(
-        go.Scatter(
-            x=ts['date'],
-            y=ts["cum_shares"],
-            mode="lines",
-            name=ticker
-        )
-    )
-
-    fig.add_trace(
-        go.Scatter(
-            x=dots["date"],
-            y=dots["cum_shares"],  # aligns vertically
-            mode="markers",
-            name="Transactions",
-            marker=dict(
-                size=9,
-                color=dots["shares"],
-                colorscale="RdYlGn",
-                showscale=True,
-            ),
-            customdata=np.stack(
-                [
-                    dots['accession_number'],
-                    dots['date'],
-                    dots["insider"],
-                    dots["role"],
-                    dots["shares"]
-                ],
-                axis=-1,
-            ),
-            hovertemplate=(
-                "<b>%{customdata[0]}</b><br>"
-                "Date: %{customdata[1]}<br>"
-                "Insider: %{customdata[2]}<br>"
-                "Role: %{customdata[3]}<br>"
-                "Shares: %{customdata[4]:,.0f}<br>"
-                "<extra></extra>"
-            ),
-        )
-    )
-
-    fig.update_layout(
-        title=f"Cumulative Insider Flow — {ticker}",
-        xaxis_title="Date",
-        yaxis_title="Cumulative Net Flow",
-        template="plotly_dark",
-        showlegend=False
-    )
-
-    return fig, {"display": "block"}
+    return line_fig, {"display": "block"}, net_shares_stmt
 
 @app.callback(
     Output("time-period", "disabled"),

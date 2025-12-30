@@ -12,7 +12,6 @@ import pandas as pd
 import json
 import re
 import time
-from multiprocessing.dummy import Pool
 from datetime import datetime
 import os
 
@@ -301,7 +300,7 @@ def get_insider_trades(ticker: str) -> (str, list[dict]):  # type: ignore
 
     return ticker, a4_list
 
-def transactions_to_cumm_ts(insider_trades: list[dict], net_shares: float) -> tuple[pd.DataFrame, pd.DataFrame]:  # type: ignore
+def transactions_to_cumm_ts(insider_trades: list[dict], net_shares: float) -> tuple[pd.DataFrame, pd.DataFrame, list]:  # type: ignore
     """
     Convert transaction dictionaries into a cumulative buy/sell time series.
 
@@ -311,6 +310,7 @@ def transactions_to_cumm_ts(insider_trades: list[dict], net_shares: float) -> tu
     Returns:
         pd.DataFrame: indexed by date with cumulative shares (daily time series)
         pd.DataFrame: dots data for individual transactions
+        list: quarter_ranges: list of (start,end) tuples for each quarter in the data
     """
     cleaned_trades = []
     for trd in insider_trades:
@@ -332,6 +332,7 @@ def transactions_to_cumm_ts(insider_trades: list[dict], net_shares: float) -> tu
 
     records["date"] = pd.to_datetime(records["date"], utc=True).dt.date # type: ignore
     start_date = pd.to_datetime("1/1/2024").date()
+    end_date = datetime.today().date()
     records = records[records["date"] >= start_date]
 
     # Aggregate daily net shares
@@ -345,7 +346,7 @@ def transactions_to_cumm_ts(insider_trades: list[dict], net_shares: float) -> tu
     # Create full date index
     full_idx = pd.date_range(
         start=start_date,
-        end=datetime.now().date(),
+        end=end_date,
         freq="D"
     ).date
 
@@ -365,4 +366,9 @@ def transactions_to_cumm_ts(insider_trades: list[dict], net_shares: float) -> tu
     dots['impact'] = dots['shares'].abs() / abs(net_shares)
     dots['cum_shares'] = dots.shares.cumsum()
     dots_filtered = dots[(dots['impact'] >= 0.01) & (dots['shares'].abs() >= 5000)]  # filter out small transactions
-    return daily.reset_index().rename(columns={"index": "date"}), dots_filtered # type: ignore
+    
+    quarters = pd.date_range(start=start_date, end=end_date, freq='QS')  # quarter starts
+    # Create a list of (start, end) for each quarter
+    quarter_ranges = [(q, q + pd.offsets.QuarterEnd()) for q in quarters]
+
+    return daily.reset_index().rename(columns={"index": "date"}), dots_filtered, quarter_ranges # type: ignore
