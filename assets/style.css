@@ -5,11 +5,6 @@ font-family: "Segoe UI", sans-serif;
 }
 
 
-div, label, input, select {
-color: #8cb4ff !important;
-}
-
-
 h1, h2, h3, h4, h5, h6 {
 color: #8cb4ff !important;
 }
@@ -37,4 +32,45 @@ background-color: #111111 !important;
 input {
 background-color: #111111 !important;
 border: 1px solid #333333 !important;
+}
+
+.js-plotly-plot {
+    background-color: #303030 !important;
+}
+
+.dash-graph {
+    background-color: #303030 !important;
+}
+
+/* Dropdown main control */
+.Select-control {
+    background-color: #2c2c2c !important;
+    border: 1px solid #444 !important;
+    color: white !important;
+}
+
+/* When focused */
+.Select-control:hover {
+    border-color: #666 !important;
+}
+
+/* Selected value text */
+.Select-value-label {
+    color: white !important;
+}
+
+/* Dropdown menu */
+.Select-menu-outer {
+    background-color: #2c2c2c !important;
+    border: 1px solid #444 !important;
+}
+
+/* Individual options */
+.Select-option {
+    background-color: #2c2c2c !important;
+    color: white !important;
+}
+
+.Select-option.is-focused {
+    background-color: #444 !important;
 }

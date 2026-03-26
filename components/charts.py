@@ -5,7 +5,39 @@
 import plotly.graph_objs as go
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
+
+from data.analytics import get_weighted_shares
+
+# ── Helper: build quarter options dynamically ──────────────────────────────
+def generate_quarter_options(start_date: str) -> list[dict]:
+    """Return a list of {label, value} dicts for every quarter from
+    `start_date` up to (and including) the current quarter.
+    
+    Args:
+        start_date: ISO date string (YYYY-MM-DD) for the earliest quarter to include.
+    """
+    start = datetime.strptime(start_date, "%m/%d/%Y").date()
+    today = date.today()
+
+    # Snap start to the beginning of its quarter
+    start_month = ((start.month - 1) // 3) * 3 + 1
+    year  = start.year
+    month = start_month
+
+    options = []
+    while (year, month) <= (today.year, today.month):
+        q     = (month - 1) // 3 + 1
+        label = f"Q{q} {year}"
+        value = date(year, month, 1).strftime("%m/%d/%Y")
+        options.append({"label": label, "value": value})
+
+        month += 3
+        if month > 12:
+            month = 1
+            year += 1
+
+    return options
 
 
 def combined_chart(df: pd.DataFrame, tickers: list[str], agg_method: str) -> go.Figure:
@@ -114,10 +146,8 @@ def rolling_insider_chart(insider_trades: dict, outstanding_shares: dict, days: 
                 break
             nd_trades = trade['non_deriv_trades']
             for nd_trade in nd_trades:
-                if nd_trade['change'] == "A":
-                    amount += nd_trade['amount']
-                elif nd_trade['change'] == "D":
-                    amount -= nd_trade['amount']
+                signed, weight = get_weighted_shares(nd_trade)
+                amount += signed * weight
         agg_monthly_flows.append(flow_dict)
 
 
@@ -211,6 +241,7 @@ def create_line_chart(ticker: str, ts: pd.DataFrame, dots: pd.DataFrame, quarter
                 color=dots["shares"],
                 colorscale="RdYlGn",
                 showscale=True,
+                cmid = 0 # anchor midpoint of color scale at 0 for red/green divergence
             ),
             customdata=np.stack(
                 [
@@ -218,7 +249,8 @@ def create_line_chart(ticker: str, ts: pd.DataFrame, dots: pd.DataFrame, quarter
                     dots['date'],
                     dots["insider"],
                     dots["role"],
-                    dots["shares"]
+                    dots["shares"],
+                    dots["url"]
                 ],
                 axis=-1,
             ),
@@ -258,5 +290,82 @@ def create_line_chart(ticker: str, ts: pd.DataFrame, dots: pd.DataFrame, quarter
 
     # Add quarter background shading
     colors = ['rgba(200,200,255,0.2)', 'rgba(200,255,200,0.2)']  # alternating colors
+
+    return fig
+
+def yoy_compare_bar(stock_a, stock_b, df_a, df_b):
+
+    common_years = df_a.index.intersection(df_b.index)
+
+    df_a = df_a.loc[common_years]
+    df_b = df_b.loc[common_years]
+
+    years = df_a.index.tolist()
+    metrics = ["Revenue", "Net Income"]
+
+    x_axis = [
+        [year for year in years for _ in metrics],
+        metrics * len(years)
+    ]
+
+    fig = go.Figure()
+
+    fig.add_bar(
+        name=stock_a,
+        x=x_axis,
+        y=[
+            value
+            for year in years
+            for value in [
+                df_a.loc[year, "Revenue"],
+                df_a.loc[year, "Net Income"]
+            ]
+        ],
+        marker_color="#375a7f"   # Darkly primary blue
+    )
+
+    fig.add_bar(
+        name=stock_b,
+        x=x_axis,
+        y=[
+            value
+            for year in years
+            for value in [
+                df_b.loc[year, "Revenue"],
+                df_b.loc[year, "Net Income"]
+            ]
+        ],
+        marker_color="#00bc8c"   # Darkly success green
+    )
+
+    fig.update_layout(
+        template="plotly_dark",
+        barmode="group",
+        title=f"{stock_a} vs {stock_b} — YoY Growth Comparison",
+        yaxis_title="Percent Change (%)",
+        xaxis=dict(type="multicategory"),
+        paper_bgcolor="rgba(0,0,0,0)",
+        showlegend=False,
+        plot_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=40, r=40, t=60, b=80)
+    )
+
+    fig.update_yaxes(
+        gridcolor="rgba(255,255,255,0.1)",
+        zerolinecolor="rgba(255,255,255,0.3)"
+    )
+
+    fig.update_xaxes(
+        gridcolor="rgba(255,255,255,0.05)"
+    )
+
+    fig.update_traces(
+    hovertemplate=
+        "<b>%{x[0]} — %{x[1]}</b><br>" +
+        "Growth: %{y:.2f}%<extra></extra>"
+    )
+    for trace in fig.data:
+        trace.text = [f"{v:.1f}%" for v in trace.y] # type: ignore
+        trace.textposition = "outside" # type: ignore
 
     return fig
