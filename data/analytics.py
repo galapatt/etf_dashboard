@@ -306,6 +306,117 @@ def run_factor_model(tickers: list[str]) -> pd.DataFrame:
     return df
 
 
+def get_current_etf_shares_outstanding(ticker: yf.Ticker, latest_price: float | None) -> float | None:
+    """Return current ETF shares outstanding, using AUM/price as a fallback."""
+    try:
+        info = ticker.info or {}
+    except Exception:
+        info = {}
+
+    for key in ("sharesOutstanding", "impliedSharesOutstanding"):
+        value = info.get(key)
+        if value and value > 0:
+            return float(value)
+
+    total_assets = info.get("totalAssets") or info.get("netAssets")
+    nav_or_price = info.get("navPrice") or latest_price
+    if total_assets and nav_or_price and nav_or_price > 0:
+        return float(total_assets) / float(nav_or_price)
+
+    try:
+        fast_info = ticker.fast_info
+        value = fast_info.get("shares") if hasattr(fast_info, "get") else None
+        if value and value > 0:
+            return float(value)
+    except Exception:
+        pass
+
+    return None
+
+
+def get_etf_trading_activity(etf: str, years: int = 2) -> pd.DataFrame:
+    """Summarize quarterly ETF trading activity from price and volume data."""
+    columns = [
+        "Quarter",
+        "Total Shares Traded",
+        "Volume % Current Shares Out",
+        "Avg Daily Volume",
+        "Avg Daily Volume % Current Shares Out",
+        "QoQ Volume Change %",
+        "Total Dollar Volume",
+        "Avg Daily Dollar Volume",
+        "Quarter Return %",
+    ]
+    etf = USD_EQUIVALENT_MAP.get(etf, etf)
+    end = pd.Timestamp.today().normalize()
+    start = end - pd.DateOffset(years=years)
+
+    try:
+        ticker = yf.Ticker(etf)
+        market_data = yf.download(
+            etf,
+            start=start.strftime("%Y-%m-%d"),
+            end=(end + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
+            auto_adjust=True,
+            progress=False,
+        )
+
+        if market_data.empty:
+            return pd.DataFrame(columns=columns)
+
+        if isinstance(market_data.columns, pd.MultiIndex):
+            close = market_data["Close"].iloc[:, 0]
+            volume = market_data["Volume"].iloc[:, 0]
+        else:
+            close = market_data["Close"]
+            volume = market_data["Volume"]
+
+        daily = pd.DataFrame({
+            "Close": close,
+            "Volume": volume,
+        }).dropna()
+        daily.index = pd.to_datetime(daily.index).tz_localize(None)
+        daily["Dollar Volume"] = daily["Close"] * daily["Volume"]
+        shares_outstanding = get_current_etf_shares_outstanding(
+            ticker,
+            float(daily["Close"].iloc[-1]) if not daily.empty else None,
+        )
+
+        quarterly = daily.resample("QE").agg({
+            "Volume": ["sum", "mean"],
+            "Dollar Volume": ["sum", "mean"],
+            "Close": ["first", "last"],
+        }).dropna()
+        quarterly.columns = [
+            "Total Shares Traded",
+            "Avg Daily Volume",
+            "Total Dollar Volume",
+            "Avg Daily Dollar Volume",
+            "Start Price",
+            "End Price",
+        ]
+        quarterly["Volume % Current Shares Out"] = (
+            quarterly["Total Shares Traded"] / shares_outstanding * 100
+            if shares_outstanding else None
+        )
+        quarterly["Avg Daily Volume % Current Shares Out"] = (
+            quarterly["Avg Daily Volume"] / shares_outstanding * 100
+            if shares_outstanding else None
+        )
+        quarterly["QoQ Volume Change %"] = quarterly["Total Shares Traded"].pct_change() * 100
+        quarterly["Quarter Return %"] = (
+            quarterly["End Price"] / quarterly["Start Price"] - 1
+        ) * 100
+        quarterly["Quarter"] = quarterly.index.to_period("Q").astype(str)
+
+        result = quarterly.tail(years * 4)
+        return result[columns].reset_index(drop=True)
+
+    except Exception as e:
+        print(f"[ERROR] {etf}: could not summarize ETF trading activity: {e}")
+        return pd.DataFrame(columns=columns)
+
+
 def get_top_holdings(etf):
     """
     Get the top holdings for a given ETF.
@@ -396,7 +507,7 @@ def get_daily_returns(holdings: list[str], period: str) -> tuple[pd.DataFrame,li
 
     return result, warnings
 
-def validate_and_classify_ticker(ticker: str, min_days: int = 250) -> tuple[bool, bool]:
+def validate_and_classify_ticker(ticker: str, min_days: int = 10) -> tuple[bool, bool]:
     """
     Validate a ticker and classify whether it is an ETF or a stock.
 
@@ -422,9 +533,20 @@ def validate_and_classify_ticker(ticker: str, min_days: int = 250) -> tuple[bool
 
         # 2️⃣ Asset classification
         info = t.info or {}
-        quote_type = info.get("quoteType")
-        if quote_type == "ETF":
+        quote_type = str(info.get("quoteType") or "").upper()
+        type_disp = str(info.get("typeDisp") or "").upper()
+        fund_family = info.get("fundFamily")
+        category = info.get("category")
+
+        if quote_type == "ETF" or type_disp == "ETF" or fund_family or category:
             etf = True
+
+        if not etf:
+            try:
+                fund_data = t.get_funds_data()
+                etf = bool(getattr(fund_data, "description", None) or getattr(fund_data, "top_holdings", None) is not None)
+            except Exception:
+                pass
 
         return valid, etf
 

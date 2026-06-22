@@ -8,6 +8,94 @@ def returns_chart(fig_line, fig_corr):
         dbc.Col([dcc.Graph(figure=fig_corr)], width=6),
     ], className="mt-4")
 
+
+def etf_activity_section(activity_display, etf):
+    dollar_cols = {"Total Dollar Volume", "Avg Daily Dollar Volume"}
+    percent_cols = {
+        "Volume % Current Shares Out",
+        "Avg Daily Volume % Current Shares Out",
+        "QoQ Volume Change %",
+        "Quarter Return %",
+    }
+    columns = []
+    for c in activity_display.columns:
+        col = {"name": c, "id": c}
+        if c in dollar_cols:
+            col.update({
+                "type": "numeric",
+                "format": Format(
+                    precision=0,
+                    scheme=Scheme.fixed,
+                    group=True,
+                    groups=3,
+                    group_delimiter=",",
+                ).symbol(Symbol.yes).symbol_prefix("$")
+            })
+        elif c in percent_cols:
+            col.update({
+                "type": "numeric",
+                "format": Format(precision=2, scheme=Scheme.fixed).symbol(Symbol.yes).symbol_suffix("%")
+            })
+        elif hasattr(activity_display[c], "dtype") and activity_display[c].dtype.kind in "fiu":
+            col.update({
+                "type": "numeric",
+                "format": Format(
+                    precision=0,
+                    scheme=Scheme.fixed,
+                    group=True,
+                    groups=3,
+                    group_delimiter=",",
+                )
+            })
+        columns.append(col)
+
+    style_data_conditional = []
+    for c in ["QoQ Volume Change %", "Quarter Return %"]:
+        if c not in activity_display.columns:
+            continue
+        style_data_conditional.extend([
+            {
+                "if": {"filter_query": f"{{{c}}} > 0", "column_id": c},
+                "color": "#00c853"
+            },
+            {
+                "if": {"filter_query": f"{{{c}}} < 0", "column_id": c},
+                "color": "#ff1744"
+            },
+        ])
+
+    return html.Div([
+        html.H5(f"{etf} Quarterly ETF Trading Activity", className="mb-3"),
+        dash_table.DataTable(
+            id="etf-activity-table",
+            columns=columns,
+            data=activity_display.to_dict("records"),
+            page_size=8,
+            style_table={
+                "overflowX": "auto",
+                "width": "100%",
+                "backgroundColor": "rgb(30, 30, 30)"
+            },
+            style_cell={
+                "backgroundColor": "rgb(30, 30, 30)",
+                "color": "white",
+                "textAlign": "left",
+                "padding": "6px",
+                "whiteSpace": "normal",
+                "height": "auto",
+                "border": "1px solid rgb(50, 50, 50)"
+            },
+            style_header={
+                "backgroundColor": "rgb(45, 45, 45)",
+                "color": "white",
+                "fontWeight": "bold",
+                "borderBottom": "2px solid rgb(80, 80, 80)"
+            },
+            style_data_conditional=style_data_conditional # type: ignore
+        )
+    ], className="mt-4")
+
+
 def holdings_chart(df_display, style_rules):
     # === Bottom full-width dataframe ===
     return dbc.Row([
